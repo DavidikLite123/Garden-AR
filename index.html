@@ -18,6 +18,21 @@
       justify-content: center;
     }
 
+    /* ── HTTPS Warning Banner ── */
+    #httpsWarning {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      background: linear-gradient(90deg, #7c2d12, #92400e);
+      color: #fef3c7;
+      font-size: 0.8rem;
+      text-align: center;
+      padding: 0.55rem 1rem;
+      z-index: 999;
+      display: none;
+      line-height: 1.5;
+    }
+    #httpsWarning strong { color: #fcd34d; }
+
     /* ── Landing Screen ── */
     #landing {
       position: fixed;
@@ -68,7 +83,7 @@
     }
     #landing h1 span { color: #4ade80; }
 
-    #landing p {
+    #landing p.tagline {
       color: rgba(200,240,215,0.6);
       font-size: 0.92rem;
       max-width: 300px;
@@ -123,6 +138,7 @@
       font-size: 0.82rem;
       display: none;
       max-width: 280px;
+      line-height: 1.5;
     }
 
     /* ── AR Overlay UI ── */
@@ -177,6 +193,24 @@
       color: #fca5a5;
       font-size: 0.8rem;
       cursor: pointer;
+    }
+
+    /* Hit-test fallback badge */
+    #fallbackBadge {
+      position: absolute;
+      top: env(safe-area-inset-top, 16px);
+      left: 50%;
+      transform: translateX(-50%);
+      margin-top: 56px;
+      background: rgba(120,60,0,0.75);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(251,191,36,0.4);
+      border-radius: 999px;
+      padding: 0.35rem 1rem;
+      color: #fde68a;
+      font-size: 0.72rem;
+      white-space: nowrap;
+      display: none;
     }
 
     /* Scan hint */
@@ -270,20 +304,26 @@
 </head>
 <body>
 
+<!-- ── HTTPS Warning ── -->
+<div id="httpsWarning">
+  ⚠️ <strong>HTTPS Required:</strong> WebXR will not work over plain HTTP.
+  Please serve this page via <strong>https://</strong> or <code>localhost</code>.
+</div>
+
 <!-- ── Landing Screen ── -->
 <div id="landing">
   <div class="logo-ring">
     <span class="logo-emoji">🌿</span>
   </div>
   <h1>Garden <span>Horizons</span></h1>
-  <p>Place magical plants in your real world. Watch them bloom through Augmented Reality.</p>
+  <p class="tagline">Place magical plants in your real world. Watch them bloom through Augmented Reality.</p>
   <div class="feature-pills">
     <span class="pill">🌱 Surface Detection</span>
     <span class="pill">✨ Growth Stages</span>
     <span class="pill">💧 Watering Effects</span>
   </div>
   <button id="startBtn">✦ Start AR Experience</button>
-  <p id="noArMsg">⚠️ WebXR AR is not supported on this device/browser. Try Chrome on Android or Safari 16+ on iOS.</p>
+  <p id="noArMsg"></p>
 </div>
 
 <!-- ── AR Overlay ── -->
@@ -295,6 +335,7 @@
     </div>
     <button id="exitBtn">✕ Exit</button>
   </div>
+  <div id="fallbackBadge">⚡ Fallback mode – surface detection unavailable</div>
   <div id="scanHint">📡 Move your phone slowly to detect surfaces</div>
   <div id="bottomBar">
     <button id="plantBtn" class="disabled">
@@ -311,31 +352,55 @@
 
 <script>
 // ═══════════════════════════════════════════════════
-//  Garden Horizons AR – Core Engine
+//  Garden Horizons AR – Core Engine (Fixed)
 // ═══════════════════════════════════════════════════
+
+// ── FIX 5: HTTPS Check (runs immediately on load) ──
+(function checkHttps() {
+  const loc = window.location;
+  const isSecure = loc.protocol === 'https:' || loc.hostname === 'localhost' || loc.hostname === '127.0.0.1';
+  if (!isSecure) {
+    const banner = document.getElementById('httpsWarning');
+    banner.style.display = 'block';
+    // Also nudge the landing panel down so it clears the banner
+    document.getElementById('landing').style.paddingTop = '3.5rem';
+    console.warn(
+      '%c[Garden Horizons AR] ⚠️ HTTPS REQUIRED',
+      'color:#fcd34d;font-weight:bold;font-size:14px;',
+      '\nWebXR requires a secure context (https://) or localhost.',
+      '\nThe "Start AR" button will be disabled until you switch to HTTPS.'
+    );
+  }
+})();
 
 const FLOWER_COLORS = [0xff69b4, 0xffdd00, 0xff8c42, 0xda70d6, 0xff4f7b, 0xffc0cb, 0xffd700];
 const GROWTH_DURATION = 10000; // ms
 
 // ── State ──────────────────────────────────────────
-let renderer, scene, camera, xrSession, hitTestSource, hitTestSourceRequested = false;
-let reticle, reticleHelper;
-let plants = [];
-let plantCount = 0;
+let renderer, scene, camera, xrSession;
+let hitTestSource      = null;
+let hitTestSourceReady = false; // true once source is obtained
+let hitTestRequested   = false; // guard – request only once per session
+let hitTestSupported   = true;  // FIX 4: toggled false on fallback
+let reticle;
+let plants        = [];
+let plantCount    = 0;
 let reticleVisible = false;
-let frameCount = 0;
-let lastHitPose = null;
+let frameCount    = 0;
+let lastHitPose   = null;
+let tapListenerAttached = false; // FIX 2: ensure listener added once
 
 // UI refs
-const landingEl    = document.getElementById('landing');
-const arOverlayEl  = document.getElementById('arOverlay');
-const startBtn     = document.getElementById('startBtn');
-const plantCountEl = document.getElementById('plantCount');
-const scanHintEl   = document.getElementById('scanHint');
-const plantBtn     = document.getElementById('plantBtn');
-const exitBtn      = document.getElementById('exitBtn');
-const toastEl      = document.getElementById('toast');
-const noArMsg      = document.getElementById('noArMsg');
+const landingEl       = document.getElementById('landing');
+const arOverlayEl     = document.getElementById('arOverlay');
+const startBtn        = document.getElementById('startBtn');
+const plantCountEl    = document.getElementById('plantCount');
+const scanHintEl      = document.getElementById('scanHint');
+const plantBtn        = document.getElementById('plantBtn');
+const exitBtn         = document.getElementById('exitBtn');
+const toastEl         = document.getElementById('toast');
+const noArMsg         = document.getElementById('noArMsg');
+const fallbackBadgeEl = document.getElementById('fallbackBadge');
 
 // ── Toast helper ────────────────────────────────────
 let toastTimer = null;
@@ -363,25 +428,23 @@ function initThree() {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.appendChild(renderer.domElement);
 
-  scene = new THREE.Scene();
-
+  scene  = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
-  // Lighting
+  // ── Lighting ──
   const ambient = new THREE.AmbientLight(0xffffff, 0.6);
   scene.add(ambient);
 
+  // FIX: directional light attached to camera so it always follows the viewer
   const dirLight = new THREE.DirectionalLight(0xfff8e7, 1.4);
   dirLight.position.set(0.5, 1, 0.5);
   dirLight.castShadow = true;
-  camera.add(dirLight); // Follow camera
-  scene.add(camera);
+  camera.add(dirLight);
+  scene.add(camera); // camera must be in scene for its children to be lit
 
-  // Hemisphere light for natural feel
   const hemi = new THREE.HemisphereLight(0x88ddaa, 0x332200, 0.5);
   scene.add(hemi);
 
-  // Resize handler
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -395,26 +458,36 @@ function createReticle() {
 
   // Outer ring
   const ringGeo = new THREE.RingGeometry(0.07, 0.09, 36);
-  const ringMat = new THREE.MeshBasicMaterial({ color: 0x4ade80, side: THREE.DoubleSide, transparent: true, opacity: 0.85 });
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0x4ade80, side: THREE.DoubleSide, transparent: true, opacity: 0.85
+  });
   const ring = new THREE.Mesh(ringGeo, ringMat);
   ring.rotation.x = -Math.PI / 2;
   group.add(ring);
 
   // Inner dot
   const dotGeo = new THREE.CircleGeometry(0.018, 24);
-  const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
+  const dotMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.7
+  });
   const dot = new THREE.Mesh(dotGeo, dotMat);
   dot.rotation.x = -Math.PI / 2;
   group.add(dot);
 
-  // Cross hairs
+  // Crosshairs
   for (let i = 0; i < 4; i++) {
     const lineGeo = new THREE.PlaneGeometry(0.002, 0.05);
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0x4ade80, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+    const lineMat = new THREE.MeshBasicMaterial({
+      color: 0x4ade80, side: THREE.DoubleSide, transparent: true, opacity: 0.6
+    });
     const line = new THREE.Mesh(lineGeo, lineMat);
     line.rotation.x = -Math.PI / 2;
     line.rotation.z = (i / 4) * Math.PI;
-    line.position.set(Math.cos((i / 4) * Math.PI * 2) * 0.065, 0, Math.sin((i / 4) * Math.PI * 2) * 0.065);
+    line.position.set(
+      Math.cos((i / 4) * Math.PI * 2) * 0.065,
+      0,
+      Math.sin((i / 4) * Math.PI * 2) * 0.065
+    );
     group.add(line);
   }
 
@@ -427,29 +500,29 @@ function createReticle() {
 function createPlantMesh() {
   const group = new THREE.Group();
 
-  // Stem
   const stemGeo = new THREE.CylinderGeometry(0.008, 0.012, 0.18, 8);
-  const stemMat = new THREE.MeshStandardMaterial({ color: 0x4a7c3f, roughness: 0.8, metalness: 0.0 });
-  const stem = new THREE.Mesh(stemGeo, stemMat);
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0x4a7c3f, roughness: 0.8 });
+  const stem    = new THREE.Mesh(stemGeo, stemMat);
   stem.position.y = 0.09;
   stem.castShadow = true;
   group.add(stem);
 
-  // Main bud (sphere)
   const budGeo = new THREE.SphereGeometry(0.07, 16, 16);
-  const budMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.5, metalness: 0.1, emissive: 0x0a3a0a, emissiveIntensity: 0.2 });
+  const budMat = new THREE.MeshStandardMaterial({
+    color: 0x22c55e, roughness: 0.5, metalness: 0.1,
+    emissive: 0x0a3a0a, emissiveIntensity: 0.2
+  });
   const bud = new THREE.Mesh(budGeo, budMat);
   bud.position.y = 0.21;
   bud.castShadow = true;
   group.add(bud);
 
-  // Two small leaves
   for (let i = 0; i < 2; i++) {
     const leafGeo = new THREE.SphereGeometry(0.04, 8, 8);
     leafGeo.scale(1, 0.4, 1.6);
     const leafMat = new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.7 });
-    const leaf = new THREE.Mesh(leafGeo, leafMat);
-    const angle = (i / 2) * Math.PI;
+    const leaf    = new THREE.Mesh(leafGeo, leafMat);
+    const angle   = (i / 2) * Math.PI;
     leaf.position.set(Math.cos(angle) * 0.07, 0.14 + i * 0.02, Math.sin(angle) * 0.07);
     leaf.rotation.y = angle;
     leaf.castShadow = true;
@@ -462,26 +535,30 @@ function createPlantMesh() {
 function createFlowerMesh(color) {
   const group = new THREE.Group();
 
-  // Stem
   const stemGeo = new THREE.CylinderGeometry(0.008, 0.014, 0.22, 8);
   const stemMat = new THREE.MeshStandardMaterial({ color: 0x4a7c3f, roughness: 0.8 });
-  const stem = new THREE.Mesh(stemGeo, stemMat);
+  const stem    = new THREE.Mesh(stemGeo, stemMat);
   stem.position.y = 0.11;
   group.add(stem);
 
-  // Center sphere
   const centerGeo = new THREE.SphereGeometry(0.06, 16, 16);
-  const centerMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.4, metalness: 0.2, emissive: 0x332200, emissiveIntensity: 0.3 });
+  const centerMat = new THREE.MeshStandardMaterial({
+    color: 0xffd700, roughness: 0.4, metalness: 0.2,
+    emissive: 0x332200, emissiveIntensity: 0.3
+  });
   const center = new THREE.Mesh(centerGeo, centerMat);
   center.position.y = 0.26;
   group.add(center);
 
-  // Petals
   const petalCount = 7;
   for (let i = 0; i < petalCount; i++) {
-    const pGeo = new THREE.SphereGeometry(0.05, 10, 10);
+    const pGeo  = new THREE.SphereGeometry(0.05, 10, 10);
     pGeo.scale(0.7, 0.35, 1.1);
-    const pMat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.05, emissive: color, emissiveIntensity: 0.1, transparent: true, opacity: 0.95 });
+    const pMat  = new THREE.MeshStandardMaterial({
+      color, roughness: 0.4, metalness: 0.05,
+      emissive: color, emissiveIntensity: 0.1,
+      transparent: true, opacity: 0.95
+    });
     const petal = new THREE.Mesh(pGeo, pMat);
     const angle = (i / petalCount) * Math.PI * 2;
     const r = 0.1;
@@ -491,13 +568,12 @@ function createFlowerMesh(color) {
     group.add(petal);
   }
 
-  // Leaves
   for (let i = 0; i < 2; i++) {
     const leafGeo = new THREE.SphereGeometry(0.045, 8, 8);
     leafGeo.scale(1, 0.3, 1.8);
     const leafMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.7 });
-    const leaf = new THREE.Mesh(leafGeo, leafMat);
-    const a = (i / 2) * Math.PI + Math.PI / 4;
+    const leaf    = new THREE.Mesh(leafGeo, leafMat);
+    const a       = (i / 2) * Math.PI + Math.PI / 4;
     leaf.position.set(Math.cos(a) * 0.09, 0.1 + i * 0.03, Math.sin(a) * 0.09);
     leaf.rotation.y = a;
     group.add(leaf);
@@ -508,9 +584,9 @@ function createFlowerMesh(color) {
 
 // ── Particle Effect ──────────────────────────────────
 function createWaterParticles(position) {
-  const count = 28;
-  const geo = new THREE.BufferGeometry();
-  const positions = new Float32Array(count * 3);
+  const count      = 28;
+  const geo        = new THREE.BufferGeometry();
+  const positions  = new Float32Array(count * 3);
   const velocities = [];
 
   for (let i = 0; i < count; i++) {
@@ -532,31 +608,25 @@ function createWaterParticles(position) {
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
   const mat = new THREE.PointsMaterial({
-    color: 0x67e8f9,
-    size: 0.018,
-    transparent: true,
-    opacity: 0.85,
+    color: 0x67e8f9, size: 0.018,
+    transparent: true, opacity: 0.85,
     sizeAttenuation: true
   });
 
   const points = new THREE.Points(geo, mat);
   scene.add(points);
-
   return { points, geo, velocities, alive: true };
 }
 
 // ── Bounce animation ─────────────────────────────────
 function bouncePlant(plantObj) {
-  const target = plantObj.group;
+  const target    = plantObj.group;
   const startTime = performance.now();
   const baseScale = plantObj.currentScale;
 
   function animBounce(now) {
     const t = (now - startTime) / 400;
-    if (t >= 1) {
-      target.scale.setScalar(baseScale);
-      return;
-    }
+    if (t >= 1) { target.scale.setScalar(baseScale); return; }
     const bounce = 1 + Math.sin(t * Math.PI) * 0.35 * (1 - t);
     target.scale.setScalar(baseScale * bounce);
     requestAnimationFrame(animBounce);
@@ -571,22 +641,20 @@ function placePlant(position, quaternion) {
   group.position.copy(position);
   group.quaternion.copy(quaternion);
   group.scale.setScalar(0.08);
-
   scene.add(group);
+
   plantCount++;
   plantCountEl.textContent = plantCount;
 
   const plantObj = {
-    group,
-    bud,
-    budMat,
-    position: position.clone(),
-    quaternion: quaternion.clone(),
-    phase: 'growing',       // growing | bloomed
-    growStart: performance.now(),
+    group, bud, budMat,
+    position:    position.clone(),
+    quaternion:  quaternion.clone(),
+    phase:       'growing',
+    growStart:   performance.now(),
     currentScale: 0.08,
-    bloomed: false,
-    particles: [],
+    bloomed:     false,
+    particles:   [],
     flowerColor: FLOWER_COLORS[Math.floor(Math.random() * FLOWER_COLORS.length)]
   };
 
@@ -607,15 +675,28 @@ function waterPlant(plantObj) {
 const raycaster = new THREE.Raycaster();
 const tapPoint  = new THREE.Vector2();
 
+// FIX 2: Single unified tap handler — handles both touch and pointer.
+//        Bound ONCE via 'pointerup'. touchend removed entirely.
+//        e.preventDefault() inside prevents ghost click on mobile.
 function handleTap(event) {
+  // Only fire on primary pointer (left mouse button / first touch)
+  if (event.button !== undefined && event.button !== 0) return;
   if (!xrSession) return;
 
-  const clientX = event.clientX ?? event.touches?.[0]?.clientX;
-  const clientY = event.clientY ?? event.touches?.[0]?.clientY;
-  if (clientX == null) return;
+  event.preventDefault();
+
+  let clientX, clientY;
+  if (event.changedTouches && event.changedTouches.length > 0) {
+    clientX = event.changedTouches[0].clientX;
+    clientY = event.changedTouches[0].clientY;
+  } else {
+    clientX = event.clientX;
+    clientY = event.clientY;
+  }
+  if (clientX == null || clientY == null) return;
 
   tapPoint.set(
-    (clientX / window.innerWidth)  * 2 - 1,
+    (clientX  / window.innerWidth)  * 2 - 1,
     -(clientY / window.innerHeight) * 2 + 1
   );
 
@@ -627,8 +708,7 @@ function handleTap(event) {
 
   const hits = raycaster.intersectObjects(meshes, false);
   if (hits.length > 0) {
-    // Find which plant was hit
-    const hitObj = hits[0].object;
+    const hitObj  = hits[0].object;
     const plantObj = plants.find(p => {
       let found = false;
       p.group.traverse(c => { if (c === hitObj) found = true; });
@@ -637,45 +717,47 @@ function handleTap(event) {
     if (plantObj) { waterPlant(plantObj); return; }
   }
 
-  // No plant hit → place new plant at reticle
+  // No plant hit → place new plant at reticle (or screen-centre fallback)
   if (reticleVisible && lastHitPose) {
-    const pos = new THREE.Vector3();
+    const pos  = new THREE.Vector3();
     const quat = new THREE.Quaternion();
-    const mat = new THREE.Matrix4().fromArray(lastHitPose.transform.matrix);
+    const mat  = new THREE.Matrix4().fromArray(lastHitPose.transform.matrix);
     pos.setFromMatrixPosition(mat);
     quat.setFromRotationMatrix(mat);
     placePlant(pos, quat);
+  } else if (!hitTestSupported) {
+    // FIX 4 fallback: place 1 m in front of the camera
+    const pos = new THREE.Vector3(0, -0.3, -1).applyMatrix4(camera.matrixWorld);
+    placePlant(pos, new THREE.Quaternion());
   }
 }
 
-// ── Growth & particle update loop ────────────────────
+// ── Growth & particle update ──────────────────────────
 function updatePlants(timestamp) {
   for (const p of plants) {
-    // Growth phase
     if (p.phase === 'growing') {
       const elapsed = timestamp - p.growStart;
-      const t = Math.min(elapsed / GROWTH_DURATION, 1.0);
-      // Smooth easing: ease-in-out cubic
-      const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const t       = Math.min(elapsed / GROWTH_DURATION, 1.0);
+      // Ease-in-out cubic
+      const eased   = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
       p.currentScale = 0.08 + eased * 0.92;
       p.group.scale.setScalar(p.currentScale);
 
-      // Bloom at completion
       if (t >= 1.0 && !p.bloomed) {
         p.bloomed = true;
-        p.phase = 'bloomed';
+        p.phase   = 'bloomed';
         bloomPlant(p);
       }
     }
 
-    // Gentle sway animation
+    // Gentle sway
     const sway = Math.sin(timestamp * 0.001 + plants.indexOf(p) * 1.3) * 0.012;
     p.group.rotation.z = sway;
 
     // Particle update
     p.particles = p.particles.filter(ps => {
       if (!ps.alive) return false;
-      const pos = ps.geo.attributes.position.array;
+      const pos    = ps.geo.attributes.position.array;
       let anyAlive = false;
       for (let i = 0; i < ps.velocities.length; i++) {
         const v = ps.velocities[i];
@@ -685,11 +767,11 @@ function updatePlants(timestamp) {
         pos[i * 3]     += v.x;
         pos[i * 3 + 1] += v.y;
         pos[i * 3 + 2] += v.z;
-        v.y -= 0.00025; // gravity
+        v.y -= 0.00025;
       }
       ps.geo.attributes.position.needsUpdate = true;
-      ps.points.material.opacity = Math.max(0, ps.velocities.reduce((a, b) => a + b.life, 0) / ps.velocities.length);
-
+      ps.points.material.opacity =
+        Math.max(0, ps.velocities.reduce((a, b) => a + b.life, 0) / ps.velocities.length);
       if (!anyAlive) {
         scene.remove(ps.points);
         ps.alive = false;
@@ -702,7 +784,6 @@ function updatePlants(timestamp) {
 
 // ── Bloom transition ─────────────────────────────────
 function bloomPlant(plantObj) {
-  // Remove old group
   scene.remove(plantObj.group);
 
   const flowerGroup = createFlowerMesh(plantObj.flowerColor);
@@ -711,15 +792,13 @@ function bloomPlant(plantObj) {
   flowerGroup.scale.setScalar(1.0);
   scene.add(flowerGroup);
 
-  plantObj.group = flowerGroup;
+  plantObj.group        = flowerGroup;
   plantObj.currentScale = 1.0;
 
-  // Bloom burst particles
-  const p = createWaterParticles(plantObj.position);
-  // Recolor to flower color
-  p.points.material.color.setHex(plantObj.flowerColor);
-  p.points.material.size = 0.022;
-  plantObj.particles.push(p);
+  const burst = createWaterParticles(plantObj.position);
+  burst.points.material.color.setHex(plantObj.flowerColor);
+  burst.points.material.size = 0.022;
+  plantObj.particles.push(burst);
 
   showToast('🌸 Bloom!');
 }
@@ -734,34 +813,44 @@ function animateReticle(timestamp) {
   reticle.rotation.y += 0.015;
 }
 
-// ── XR Frame loop ────────────────────────────────────
+// ── XR Frame loop ─────────────────────────────────────
+// FIX 1: NO renderer.setAnimationLoop() call inside here.
+//        The loop is set ONCE in startAR() and driven by renderer.xr.setAnimationLoop().
 function onXRFrame(timestamp, frame) {
-  renderer.setAnimationLoop(onXRFrame); // keep looping
-
   const referenceSpace = renderer.xr.getReferenceSpace();
-  const session = renderer.xr.getSession();
+  const session        = renderer.xr.getSession();
 
-  // Request hit-test source once
-  if (!hitTestSourceRequested && session) {
-    session.requestReferenceSpace('viewer').then(viewerSpace => {
-      session.requestHitTestSource({ space: viewerSpace }).then(source => {
-        hitTestSource = source;
+  // ── FIX 4: Request hit-test source once per session ──────────────────────
+  if (!hitTestRequested && session) {
+    hitTestRequested = true; // guard immediately to prevent duplicate requests
+
+    session.requestReferenceSpace('viewer')
+      .then(viewerSpace => session.requestHitTestSource({ space: viewerSpace }))
+      .then(source => {
+        hitTestSource      = source;
+        hitTestSourceReady = true;
+        hitTestSupported   = true;
+        console.log('[GardenHorizons] Hit-test source obtained ✓');
+      })
+      .catch(err => {
+        // Hit-test not supported (e.g. session started without the feature)
+        hitTestSupported = false;
+        hitTestSourceReady = false;
+        fallbackBadgeEl.style.display = 'block';
+        scanHintEl.textContent = '👆 Tap the screen to place a plant';
+        reticleVisible  = true; // keep planting enabled
+        reticle.visible = false; // but don't show a misleading reticle
+        plantBtn.classList.remove('disabled');
+        console.warn('[GardenHorizons] Hit-test unavailable, using fallback placement:', err.message);
       });
-    });
-    session.addEventListener('end', () => {
-      hitTestSourceRequested = false;
-      hitTestSource = null;
-    });
-    hitTestSourceRequested = true;
   }
 
-  // Process hit test results
-  if (hitTestSource && frame) {
+  // ── Process hit test results ──────────────────────
+  if (hitTestSourceReady && hitTestSource && frame) {
     const results = frame.getHitTestResults(hitTestSource);
     if (results.length > 0) {
-      const hit = results[0];
-      const pose = hit.getPose(referenceSpace);
-      lastHitPose = pose;
+      const pose = results[0].getPose(referenceSpace);
+      lastHitPose    = pose;
       reticleVisible = true;
 
       const mat = new THREE.Matrix4().fromArray(pose.transform.matrix);
@@ -769,21 +858,14 @@ function onXRFrame(timestamp, frame) {
       reticle.quaternion.setFromRotationMatrix(mat);
       reticle.visible = true;
 
-      // Enable plant button
       plantBtn.classList.remove('disabled');
-
-      // Update scan hint
-      if (frameCount < 60) {
-        scanHintEl.style.opacity = '1';
-      } else {
-        scanHintEl.style.opacity = '0';
-      }
+      if (frameCount > 60) scanHintEl.style.opacity = '0';
     } else {
-      reticleVisible = false;
+      reticleVisible  = false;
       reticle.visible = false;
       plantBtn.classList.add('disabled');
-      scanHintEl.style.opacity = '1';
-      scanHintEl.textContent = '📡 Move slowly to detect surfaces';
+      scanHintEl.style.opacity  = '1';
+      scanHintEl.textContent    = '📡 Move slowly to detect surfaces';
     }
   }
 
@@ -793,14 +875,50 @@ function onXRFrame(timestamp, frame) {
   renderer.render(scene, camera);
 }
 
-// ── Start AR Session ─────────────────────────────────
+// ── Session cleanup helper ────────────────────────────
+function cleanupSession() {
+  xrSession          = null;
+  hitTestSource      = null;
+  hitTestSourceReady = false;
+  hitTestRequested   = false;
+  hitTestSupported   = true;
+  lastHitPose        = null;
+  reticleVisible     = false;
+  frameCount         = 0;
+  plants             = [];
+  plantCount         = 0;
+  tapListenerAttached = false;
+  plantCountEl.textContent = '0';
+  fallbackBadgeEl.style.display = 'none';
+  scanHintEl.style.opacity = '1';
+  scanHintEl.textContent   = '📡 Move your phone slowly to detect surfaces';
+
+  // Stop the render loop
+  if (renderer) renderer.xr.setAnimationLoop(null);
+
+  // Remove the canvas
+  if (renderer && renderer.domElement && renderer.domElement.parentNode) {
+    renderer.domElement.parentNode.removeChild(renderer.domElement);
+  }
+  if (renderer) { renderer.dispose(); renderer = null; }
+  scene  = null;
+  camera = null;
+  reticle = null;
+
+  landingEl.style.display    = 'flex';
+  arOverlayEl.style.display  = 'none';
+}
+
+// ── Start AR Session ──────────────────────────────────
 async function startAR() {
   initThree();
   reticle = createReticle();
 
+  // FIX 4: hit-test is listed as optional so the session still starts
+  //        even on devices/browsers that don't support it.
   const sessionInit = {
-    requiredFeatures: ['hit-test'],
-    optionalFeatures: ['dom-overlay', 'light-estimation'],
+    requiredFeatures: [],
+    optionalFeatures: ['hit-test', 'dom-overlay', 'light-estimation'],
     domOverlay: { root: arOverlayEl }
   };
 
@@ -808,85 +926,99 @@ async function startAR() {
     const session = await navigator.xr.requestSession('immersive-ar', sessionInit);
     xrSession = session;
 
-    renderer.xr.setReferenceSpaceType('local');
+    // FIX 3: Call setSession FIRST, then configure the reference space type.
+    //        setSession() hands control of the GL context to WebXR.
     await renderer.xr.setSession(session);
+    renderer.xr.setReferenceSpaceType('local');
 
-    // Hide landing, show overlay
-    landingEl.style.display = 'none';
+    // Show AR UI
+    landingEl.style.display   = 'none';
     arOverlayEl.style.display = 'block';
 
-    // Start loop
-    renderer.setAnimationLoop(onXRFrame);
+    // FIX 1: Start the XR render loop exactly ONCE here.
+    //        onXRFrame itself never calls setAnimationLoop again.
+    renderer.xr.setAnimationLoop(onXRFrame);
 
-    // Tap to place / water
-    renderer.domElement.addEventListener('click', handleTap);
-    renderer.domElement.addEventListener('touchend', e => {
-      e.preventDefault();
-      handleTap(e);
-    }, { passive: false });
+    // FIX 2: Attach a SINGLE 'pointerup' listener (covers mouse + touch).
+    //        No 'click', no 'touchend' — zero double-fire risk.
+    if (!tapListenerAttached) {
+      renderer.domElement.addEventListener('pointerup', handleTap, { passive: false });
+      tapListenerAttached = true;
+    }
 
-    // Plant button
+    // Plant button handler (stop propagation so it doesn't also fire handleTap)
     plantBtn.addEventListener('click', e => {
       e.stopPropagation();
-      if (!reticleVisible || !lastHitPose) return;
-      const pos = new THREE.Vector3();
-      const quat = new THREE.Quaternion();
-      const mat = new THREE.Matrix4().fromArray(lastHitPose.transform.matrix);
-      pos.setFromMatrixPosition(mat);
-      quat.setFromRotationMatrix(mat);
-      placePlant(pos, quat);
+      if (!reticleVisible && !(!hitTestSupported)) return;
+      if (hitTestSupported && !lastHitPose) return;
+
+      if (hitTestSupported && lastHitPose) {
+        const pos  = new THREE.Vector3();
+        const quat = new THREE.Quaternion();
+        const mat  = new THREE.Matrix4().fromArray(lastHitPose.transform.matrix);
+        pos.setFromMatrixPosition(mat);
+        quat.setFromRotationMatrix(mat);
+        placePlant(pos, quat);
+      } else if (!hitTestSupported) {
+        const pos = new THREE.Vector3(0, -0.3, -1).applyMatrix4(camera.matrixWorld);
+        placePlant(pos, new THREE.Quaternion());
+      }
     });
 
-    session.addEventListener('end', () => {
-      xrSession = null;
-      renderer.setAnimationLoop(null);
-      plants = [];
-      plantCount = 0;
-      plantCountEl.textContent = '0';
-      hitTestSourceRequested = false;
-      hitTestSource = null;
-      lastHitPose = null;
-      reticleVisible = false;
-      landingEl.style.display = 'flex';
-      arOverlayEl.style.display = 'none';
-      // Remove canvas
-      if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement);
-      renderer.dispose();
-      renderer = null;
-      scene = null;
-      camera = null;
-      reticle = null;
-      frameCount = 0;
-    });
+    // Session-end cleanup
+    session.addEventListener('end', cleanupSession);
 
   } catch (err) {
-    console.error('WebXR Error:', err);
-    showToast('❌ Could not start AR session');
-    noArMsg.style.display = 'block';
+    console.error('[GardenHorizons] WebXR session error:', err);
+    // Clean up the Three.js objects we already created
+    if (renderer && renderer.domElement && renderer.domElement.parentNode) {
+      renderer.domElement.parentNode.removeChild(renderer.domElement);
+    }
+    if (renderer) { renderer.dispose(); renderer = null; }
+    scene = camera = reticle = null;
+
+    const msg = err.name === 'NotSupportedError'
+      ? '⚠️ WebXR AR is not supported on this device/browser. Use Chrome on Android or Safari 16+ on iOS.'
+      : `❌ Could not start AR: ${err.message}`;
+    noArMsg.textContent    = msg;
+    noArMsg.style.display  = 'block';
+    showToast('❌ AR session failed');
   }
 }
 
-// ── Exit AR ──────────────────────────────────────────
+// ── Exit AR ───────────────────────────────────────────
 exitBtn.addEventListener('click', () => {
   if (xrSession) xrSession.end();
 });
 
-// ── Start button ─────────────────────────────────────
+// ── Start button ──────────────────────────────────────
 startBtn.addEventListener('click', async () => {
-  const supported = await checkARSupport();
-  if (!supported) {
+  noArMsg.style.display = 'none';
+
+  const isSecure = location.protocol === 'https:' ||
+                   location.hostname  === 'localhost' ||
+                   location.hostname  === '127.0.0.1';
+  if (!isSecure) {
+    noArMsg.textContent   = '🔒 WebXR requires HTTPS. Please reload this page over a secure connection.';
     noArMsg.style.display = 'block';
-    noArMsg.textContent = '⚠️ WebXR AR not supported on this device. Please use Chrome on Android or Safari 16+ on iOS.';
     return;
   }
-  startBtn.disabled = true;
-  startBtn.textContent = '⏳ Initializing...';
+
+  const supported = await checkARSupport();
+  if (!supported) {
+    noArMsg.textContent   = '⚠️ WebXR AR not supported on this device. Use Chrome on Android or Safari 16+ on iOS.';
+    noArMsg.style.display = 'block';
+    return;
+  }
+
+  startBtn.disabled     = true;
+  startBtn.textContent  = '⏳ Initializing…';
   await startAR();
-  startBtn.disabled = false;
-  startBtn.textContent = '✦ Start AR Experience';
+  startBtn.disabled     = false;
+  startBtn.textContent  = '✦ Start AR Experience';
 });
 
-// ── Scan hint text cycle ─────────────────────────────
+// ── Scan hint text cycle ──────────────────────────────
 const hints = [
   '📡 Move your phone slowly to detect surfaces',
   '👆 Tap the screen to plant a seedling',
@@ -897,7 +1029,9 @@ let hintIdx = 0;
 setInterval(() => {
   if (!xrSession) return;
   hintIdx = (hintIdx + 1) % hints.length;
-  scanHintEl.textContent = hints[hintIdx];
+  if (hitTestSupported || hintIdx !== 0) {
+    scanHintEl.textContent = hints[hintIdx];
+  }
 }, 5000);
 </script>
 </body>
