@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Garden Horizons AR</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0f1a;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── Landing Screen ── */
+    #landing {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at 50% 60%, #0d2a1a 0%, #050d12 70%);
+      z-index: 100;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    .logo-ring {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      border: 3px solid rgba(74,222,128,0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.5rem;
+      position: relative;
+      animation: pulse-ring 2.5s ease-in-out infinite;
+    }
+    .logo-ring::before {
+      content: '';
+      position: absolute;
+      inset: 8px;
+      border-radius: 50%;
+      border: 2px solid rgba(74,222,128,0.25);
+      animation: pulse-ring 2.5s ease-in-out infinite 0.4s;
+    }
+    .logo-emoji { font-size: 3rem; line-height: 1; }
+
+    @keyframes pulse-ring {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.3); transform: scale(1); }
+      50% { box-shadow: 0 0 30px 8px rgba(74,222,128,0.1); transform: scale(1.04); }
+    }
+
+    #landing h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #e8fdf2;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.4rem;
+    }
+    #landing h1 span { color: #4ade80; }
+
+    #landing p {
+      color: rgba(200,240,215,0.6);
+      font-size: 0.92rem;
+      max-width: 300px;
+      line-height: 1.6;
+      margin-bottom: 2.2rem;
+    }
+
+    .feature-pills {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 2.2rem;
+    }
+    .pill {
+      background: rgba(74,222,128,0.1);
+      border: 1px solid rgba(74,222,128,0.25);
+      color: #86efac;
+      font-size: 0.75rem;
+      padding: 0.3rem 0.75rem;
+      border-radius: 999px;
+    }
+
+    #startBtn {
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      color: #fff;
+      border: none;
+      padding: 1rem 2.5rem;
+      border-radius: 999px;
+      font-size: 1.05rem;
+      font-weight: 600;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      box-shadow: 0 4px 24px rgba(34,197,94,0.4);
+      transition: transform 0.15s, box-shadow 0.15s;
+      position: relative;
+      overflow: hidden;
+    }
+    #startBtn::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent);
+    }
+    #startBtn:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(34,197,94,0.5); }
+    #startBtn:active { transform: translateY(0); }
+    #startBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #noArMsg {
+      margin-top: 1rem;
+      color: #f87171;
+      font-size: 0.82rem;
+      display: none;
+      max-width: 280px;
+    }
+
+    /* ── AR Overlay UI ── */
+    #arOverlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+      display: none;
+    }
+
+    /* Top HUD */
+    #topHud {
+      position: absolute;
+      top: env(safe-area-inset-top, 16px);
+      left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 16px 20px 0;
+      pointer-events: all;
+    }
+
+    .hud-badge {
+      background: rgba(5,15,10,0.65);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(74,222,128,0.2);
+      border-radius: 12px;
+      padding: 0.5rem 0.85rem;
+      color: #e8fdf2;
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .hud-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #4ade80;
+      animation: blink 1.8s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    #plantCount { font-weight: 700; color: #4ade80; }
+
+    #exitBtn {
+      background: rgba(5,15,10,0.65);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(248,113,113,0.3);
+      border-radius: 12px;
+      padding: 0.5rem 0.85rem;
+      color: #fca5a5;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    /* Scan hint */
+    #scanHint {
+      position: absolute;
+      bottom: 160px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(5,15,10,0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(74,222,128,0.2);
+      border-radius: 999px;
+      padding: 0.6rem 1.4rem;
+      color: rgba(200,240,215,0.85);
+      font-size: 0.85rem;
+      white-space: nowrap;
+      transition: opacity 0.5s;
+    }
+
+    /* Bottom action bar */
+    #bottomBar {
+      position: absolute;
+      bottom: env(safe-area-inset-bottom, 24px);
+      left: 0; right: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 1.2rem;
+      padding: 0 24px 24px;
+      pointer-events: all;
+    }
+
+    #plantBtn {
+      width: 72px; height: 72px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #22c55e, #15803d);
+      border: 3px solid rgba(255,255,255,0.25);
+      box-shadow: 0 4px 24px rgba(34,197,94,0.45), inset 0 1px 0 rgba(255,255,255,0.2);
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.8rem;
+      transition: transform 0.1s, box-shadow 0.1s;
+      position: relative;
+    }
+    #plantBtn:active { transform: scale(0.9); }
+    #plantBtn.disabled {
+      background: rgba(74,222,128,0.15);
+      box-shadow: none;
+      cursor: not-allowed;
+    }
+    #plantBtn .ripple-ring {
+      position: absolute;
+      inset: -8px;
+      border-radius: 50%;
+      border: 2px solid rgba(74,222,128,0.4);
+      animation: ripple-pulse 2s ease-out infinite;
+    }
+    @keyframes ripple-pulse {
+      0% { transform: scale(1); opacity: 0.7; }
+      100% { transform: scale(1.5); opacity: 0; }
+    }
+
+    /* Toast notification */
+    #toast {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0.8);
+      background: rgba(5,15,10,0.9);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(74,222,128,0.3);
+      border-radius: 16px;
+      padding: 0.7rem 1.5rem;
+      color: #86efac;
+      font-size: 0.9rem;
+      font-weight: 600;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s, transform 0.3s;
+      z-index: 50;
+      white-space: nowrap;
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    /* WebXR canvas */
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+
+<!-- ── Landing Screen ── -->
+<div id="landing">
+  <div class="logo-ring">
+    <span class="logo-emoji">🌿</span>
+  </div>
+  <h1>Garden <span>Horizons</span></h1>
+  <p>Place magical plants in your real world. Watch them bloom through Augmented Reality.</p>
+  <div class="feature-pills">
+    <span class="pill">🌱 Surface Detection</span>
+    <span class="pill">✨ Growth Stages</span>
+    <span class="pill">💧 Watering Effects</span>
+  </div>
+  <button id="startBtn">✦ Start AR Experience</button>
+  <p id="noArMsg">⚠️ WebXR AR is not supported on this device/browser. Try Chrome on Android or Safari 16+ on iOS.</p>
+</div>
+
+<!-- ── AR Overlay ── -->
+<div id="arOverlay">
+  <div id="topHud">
+    <div class="hud-badge">
+      <div class="hud-dot"></div>
+      <span>Plants: <span id="plantCount">0</span></span>
+    </div>
+    <button id="exitBtn">✕ Exit</button>
+  </div>
+  <div id="scanHint">📡 Move your phone slowly to detect surfaces</div>
+  <div id="bottomBar">
+    <button id="plantBtn" class="disabled">
+      <div class="ripple-ring"></div>
+      🌱
+    </button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- Three.js -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.min.js"></script>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  Garden Horizons AR – Core Engine
+// ═══════════════════════════════════════════════════
+
+const FLOWER_COLORS = [0xff69b4, 0xffdd00, 0xff8c42, 0xda70d6, 0xff4f7b, 0xffc0cb, 0xffd700];
+const GROWTH_DURATION = 10000; // ms
+
+// ── State ──────────────────────────────────────────
+let renderer, scene, camera, xrSession, hitTestSource, hitTestSourceRequested = false;
+let reticle, reticleHelper;
+let plants = [];
+let plantCount = 0;
+let reticleVisible = false;
+let frameCount = 0;
+let lastHitPose = null;
+
+// UI refs
+const landingEl    = document.getElementById('landing');
+const arOverlayEl  = document.getElementById('arOverlay');
+const startBtn     = document.getElementById('startBtn');
+const plantCountEl = document.getElementById('plantCount');
+const scanHintEl   = document.getElementById('scanHint');
+const plantBtn     = document.getElementById('plantBtn');
+const exitBtn      = document.getElementById('exitBtn');
+const toastEl      = document.getElementById('toast');
+const noArMsg      = document.getElementById('noArMsg');
+
+// ── Toast helper ────────────────────────────────────
+let toastTimer = null;
+function showToast(msg, duration = 2000) {
+  if (toastTimer) clearTimeout(toastTimer);
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), duration);
+}
+
+// ── Check WebXR support ─────────────────────────────
+async function checkARSupport() {
+  if (!navigator.xr) return false;
+  try { return await navigator.xr.isSessionSupported('immersive-ar'); }
+  catch { return false; }
+}
+
+// ── Init Three.js ────────────────────────────────────
+function initThree() {
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+  // Lighting
+  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+  scene.add(ambient);
+
+  const dirLight = new THREE.DirectionalLight(0xfff8e7, 1.4);
+  dirLight.position.set(0.5, 1, 0.5);
+  dirLight.castShadow = true;
+  camera.add(dirLight); // Follow camera
+  scene.add(camera);
+
+  // Hemisphere light for natural feel
+  const hemi = new THREE.HemisphereLight(0x88ddaa, 0x332200, 0.5);
+  scene.add(hemi);
+
+  // Resize handler
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
+
+// ── Reticle ──────────────────────────────────────────
+function createReticle() {
+  const group = new THREE.Group();
+
+  // Outer ring
+  const ringGeo = new THREE.RingGeometry(0.07, 0.09, 36);
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0x4ade80, side: THREE.DoubleSide, transparent: true, opacity: 0.85 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  group.add(ring);
+
+  // Inner dot
+  const dotGeo = new THREE.CircleGeometry(0.018, 24);
+  const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.7 });
+  const dot = new THREE.Mesh(dotGeo, dotMat);
+  dot.rotation.x = -Math.PI / 2;
+  group.add(dot);
+
+  // Cross hairs
+  for (let i = 0; i < 4; i++) {
+    const lineGeo = new THREE.PlaneGeometry(0.002, 0.05);
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0x4ade80, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+    const line = new THREE.Mesh(lineGeo, lineMat);
+    line.rotation.x = -Math.PI / 2;
+    line.rotation.z = (i / 4) * Math.PI;
+    line.position.set(Math.cos((i / 4) * Math.PI * 2) * 0.065, 0, Math.sin((i / 4) * Math.PI * 2) * 0.065);
+    group.add(line);
+  }
+
+  group.visible = false;
+  scene.add(group);
+  return group;
+}
+
+// ── Plant creation ───────────────────────────────────
+function createPlantMesh() {
+  const group = new THREE.Group();
+
+  // Stem
+  const stemGeo = new THREE.CylinderGeometry(0.008, 0.012, 0.18, 8);
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0x4a7c3f, roughness: 0.8, metalness: 0.0 });
+  const stem = new THREE.Mesh(stemGeo, stemMat);
+  stem.position.y = 0.09;
+  stem.castShadow = true;
+  group.add(stem);
+
+  // Main bud (sphere)
+  const budGeo = new THREE.SphereGeometry(0.07, 16, 16);
+  const budMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.5, metalness: 0.1, emissive: 0x0a3a0a, emissiveIntensity: 0.2 });
+  const bud = new THREE.Mesh(budGeo, budMat);
+  bud.position.y = 0.21;
+  bud.castShadow = true;
+  group.add(bud);
+
+  // Two small leaves
+  for (let i = 0; i < 2; i++) {
+    const leafGeo = new THREE.SphereGeometry(0.04, 8, 8);
+    leafGeo.scale(1, 0.4, 1.6);
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.7 });
+    const leaf = new THREE.Mesh(leafGeo, leafMat);
+    const angle = (i / 2) * Math.PI;
+    leaf.position.set(Math.cos(angle) * 0.07, 0.14 + i * 0.02, Math.sin(angle) * 0.07);
+    leaf.rotation.y = angle;
+    leaf.castShadow = true;
+    group.add(leaf);
+  }
+
+  return { group, bud, budMat, stem };
+}
+
+function createFlowerMesh(color) {
+  const group = new THREE.Group();
+
+  // Stem
+  const stemGeo = new THREE.CylinderGeometry(0.008, 0.014, 0.22, 8);
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0x4a7c3f, roughness: 0.8 });
+  const stem = new THREE.Mesh(stemGeo, stemMat);
+  stem.position.y = 0.11;
+  group.add(stem);
+
+  // Center sphere
+  const centerGeo = new THREE.SphereGeometry(0.06, 16, 16);
+  const centerMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.4, metalness: 0.2, emissive: 0x332200, emissiveIntensity: 0.3 });
+  const center = new THREE.Mesh(centerGeo, centerMat);
+  center.position.y = 0.26;
+  group.add(center);
+
+  // Petals
+  const petalCount = 7;
+  for (let i = 0; i < petalCount; i++) {
+    const pGeo = new THREE.SphereGeometry(0.05, 10, 10);
+    pGeo.scale(0.7, 0.35, 1.1);
+    const pMat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.05, emissive: color, emissiveIntensity: 0.1, transparent: true, opacity: 0.95 });
+    const petal = new THREE.Mesh(pGeo, pMat);
+    const angle = (i / petalCount) * Math.PI * 2;
+    const r = 0.1;
+    petal.position.set(Math.cos(angle) * r, 0.26 + Math.sin(angle) * 0.01, Math.sin(angle) * r);
+    petal.rotation.y = -angle;
+    petal.rotation.z = 0.3;
+    group.add(petal);
+  }
+
+  // Leaves
+  for (let i = 0; i < 2; i++) {
+    const leafGeo = new THREE.SphereGeometry(0.045, 8, 8);
+    leafGeo.scale(1, 0.3, 1.8);
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.7 });
+    const leaf = new THREE.Mesh(leafGeo, leafMat);
+    const a = (i / 2) * Math.PI + Math.PI / 4;
+    leaf.position.set(Math.cos(a) * 0.09, 0.1 + i * 0.03, Math.sin(a) * 0.09);
+    leaf.rotation.y = a;
+    group.add(leaf);
+  }
+
+  return group;
+}
+
+// ── Particle Effect ──────────────────────────────────
+function createWaterParticles(position) {
+  const count = 28;
+  const geo = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  const velocities = [];
+
+  for (let i = 0; i < count; i++) {
+    positions[i * 3]     = position.x;
+    positions[i * 3 + 1] = position.y + 0.1;
+    positions[i * 3 + 2] = position.z;
+    const theta = Math.random() * Math.PI * 2;
+    const phi   = Math.random() * Math.PI * 0.5;
+    const speed = 0.003 + Math.random() * 0.004;
+    velocities.push({
+      x: Math.sin(phi) * Math.cos(theta) * speed,
+      y: Math.cos(phi) * speed + 0.002,
+      z: Math.sin(phi) * Math.sin(theta) * speed,
+      life: 1.0,
+      decay: 0.016 + Math.random() * 0.01
+    });
+  }
+
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+  const mat = new THREE.PointsMaterial({
+    color: 0x67e8f9,
+    size: 0.018,
+    transparent: true,
+    opacity: 0.85,
+    sizeAttenuation: true
+  });
+
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+
+  return { points, geo, velocities, alive: true };
+}
+
+// ── Bounce animation ─────────────────────────────────
+function bouncePlant(plantObj) {
+  const target = plantObj.group;
+  const startTime = performance.now();
+  const baseScale = plantObj.currentScale;
+
+  function animBounce(now) {
+    const t = (now - startTime) / 400;
+    if (t >= 1) {
+      target.scale.setScalar(baseScale);
+      return;
+    }
+    const bounce = 1 + Math.sin(t * Math.PI) * 0.35 * (1 - t);
+    target.scale.setScalar(baseScale * bounce);
+    requestAnimationFrame(animBounce);
+  }
+  requestAnimationFrame(animBounce);
+}
+
+// ── Place a plant ────────────────────────────────────
+function placePlant(position, quaternion) {
+  const { group, bud, budMat } = createPlantMesh();
+
+  group.position.copy(position);
+  group.quaternion.copy(quaternion);
+  group.scale.setScalar(0.08);
+
+  scene.add(group);
+  plantCount++;
+  plantCountEl.textContent = plantCount;
+
+  const plantObj = {
+    group,
+    bud,
+    budMat,
+    position: position.clone(),
+    quaternion: quaternion.clone(),
+    phase: 'growing',       // growing | bloomed
+    growStart: performance.now(),
+    currentScale: 0.08,
+    bloomed: false,
+    particles: [],
+    flowerColor: FLOWER_COLORS[Math.floor(Math.random() * FLOWER_COLORS.length)]
+  };
+
+  plants.push(plantObj);
+  showToast('🌱 Seedling planted!');
+  return plantObj;
+}
+
+// ── Water / tap a plant ──────────────────────────────
+function waterPlant(plantObj) {
+  bouncePlant(plantObj);
+  const p = createWaterParticles(plantObj.position);
+  plantObj.particles.push(p);
+  showToast('💧 Watered!');
+}
+
+// ── Raycaster for plant tapping ──────────────────────
+const raycaster = new THREE.Raycaster();
+const tapPoint  = new THREE.Vector2();
+
+function handleTap(event) {
+  if (!xrSession) return;
+
+  const clientX = event.clientX ?? event.touches?.[0]?.clientX;
+  const clientY = event.clientY ?? event.touches?.[0]?.clientY;
+  if (clientX == null) return;
+
+  tapPoint.set(
+    (clientX / window.innerWidth)  * 2 - 1,
+    -(clientY / window.innerHeight) * 2 + 1
+  );
+
+  raycaster.setFromCamera(tapPoint, camera);
+
+  // Collect all meshes from all plants
+  const meshes = [];
+  plants.forEach(p => p.group.traverse(c => { if (c.isMesh) meshes.push(c); }));
+
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (hits.length > 0) {
+    // Find which plant was hit
+    const hitObj = hits[0].object;
+    const plantObj = plants.find(p => {
+      let found = false;
+      p.group.traverse(c => { if (c === hitObj) found = true; });
+      return found;
+    });
+    if (plantObj) { waterPlant(plantObj); return; }
+  }
+
+  // No plant hit → place new plant at reticle
+  if (reticleVisible && lastHitPose) {
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const mat = new THREE.Matrix4().fromArray(lastHitPose.transform.matrix);
+    pos.setFromMatrixPosition(mat);
+    quat.setFromRotationMatrix(mat);
+    placePlant(pos, quat);
+  }
+}
+
+// ── Growth & particle update loop ────────────────────
+function updatePlants(timestamp) {
+  for (const p of plants) {
+    // Growth phase
+    if (p.phase === 'growing') {
+      const elapsed = timestamp - p.growStart;
+      const t = Math.min(elapsed / GROWTH_DURATION, 1.0);
+      // Smooth easing: ease-in-out cubic
+      const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      p.currentScale = 0.08 + eased * 0.92;
+      p.group.scale.setScalar(p.currentScale);
+
+      // Bloom at completion
+      if (t >= 1.0 && !p.bloomed) {
+        p.bloomed = true;
+        p.phase = 'bloomed';
+        bloomPlant(p);
+      }
+    }
+
+    // Gentle sway animation
+    const sway = Math.sin(timestamp * 0.001 + plants.indexOf(p) * 1.3) * 0.012;
+    p.group.rotation.z = sway;
+
+    // Particle update
+    p.particles = p.particles.filter(ps => {
+      if (!ps.alive) return false;
+      const pos = ps.geo.attributes.position.array;
+      let anyAlive = false;
+      for (let i = 0; i < ps.velocities.length; i++) {
+        const v = ps.velocities[i];
+        v.life -= v.decay;
+        if (v.life <= 0) continue;
+        anyAlive = true;
+        pos[i * 3]     += v.x;
+        pos[i * 3 + 1] += v.y;
+        pos[i * 3 + 2] += v.z;
+        v.y -= 0.00025; // gravity
+      }
+      ps.geo.attributes.position.needsUpdate = true;
+      ps.points.material.opacity = Math.max(0, ps.velocities.reduce((a, b) => a + b.life, 0) / ps.velocities.length);
+
+      if (!anyAlive) {
+        scene.remove(ps.points);
+        ps.alive = false;
+        return false;
+      }
+      return true;
+    });
+  }
+}
+
+// ── Bloom transition ─────────────────────────────────
+function bloomPlant(plantObj) {
+  // Remove old group
+  scene.remove(plantObj.group);
+
+  const flowerGroup = createFlowerMesh(plantObj.flowerColor);
+  flowerGroup.position.copy(plantObj.position);
+  flowerGroup.quaternion.copy(plantObj.quaternion);
+  flowerGroup.scale.setScalar(1.0);
+  scene.add(flowerGroup);
+
+  plantObj.group = flowerGroup;
+  plantObj.currentScale = 1.0;
+
+  // Bloom burst particles
+  const p = createWaterParticles(plantObj.position);
+  // Recolor to flower color
+  p.points.material.color.setHex(plantObj.flowerColor);
+  p.points.material.size = 0.022;
+  plantObj.particles.push(p);
+
+  showToast('🌸 Bloom!');
+}
+
+// ── Reticle animation ────────────────────────────────
+function animateReticle(timestamp) {
+  if (!reticle) return;
+  reticle.children.forEach((c, i) => {
+    if (i === 0) c.material.opacity = 0.6 + Math.sin(timestamp * 0.003) * 0.3;
+    if (i === 1) c.material.opacity = 0.5 + Math.cos(timestamp * 0.004) * 0.3;
+  });
+  reticle.rotation.y += 0.015;
+}
+
+// ── XR Frame loop ────────────────────────────────────
+function onXRFrame(timestamp, frame) {
+  renderer.setAnimationLoop(onXRFrame); // keep looping
+
+  const referenceSpace = renderer.xr.getReferenceSpace();
+  const session = renderer.xr.getSession();
+
+  // Request hit-test source once
+  if (!hitTestSourceRequested && session) {
+    session.requestReferenceSpace('viewer').then(viewerSpace => {
+      session.requestHitTestSource({ space: viewerSpace }).then(source => {
+        hitTestSource = source;
+      });
+    });
+    session.addEventListener('end', () => {
+      hitTestSourceRequested = false;
+      hitTestSource = null;
+    });
+    hitTestSourceRequested = true;
+  }
+
+  // Process hit test results
+  if (hitTestSource && frame) {
+    const results = frame.getHitTestResults(hitTestSource);
+    if (results.length > 0) {
+      const hit = results[0];
+      const pose = hit.getPose(referenceSpace);
+      lastHitPose = pose;
+      reticleVisible = true;
+
+      const mat = new THREE.Matrix4().fromArray(pose.transform.matrix);
+      reticle.position.setFromMatrixPosition(mat);
+      reticle.quaternion.setFromRotationMatrix(mat);
+      reticle.visible = true;
+
+      // Enable plant button
+      plantBtn.classList.remove('disabled');
+
+      // Update scan hint
+      if (frameCount < 60) {
+        scanHintEl.style.opacity = '1';
+      } else {
+        scanHintEl.style.opacity = '0';
+      }
+    } else {
+      reticleVisible = false;
+      reticle.visible = false;
+      plantBtn.classList.add('disabled');
+      scanHintEl.style.opacity = '1';
+      scanHintEl.textContent = '📡 Move slowly to detect surfaces';
+    }
+  }
+
+  frameCount++;
+  animateReticle(timestamp);
+  updatePlants(timestamp);
+  renderer.render(scene, camera);
+}
+
+// ── Start AR Session ─────────────────────────────────
+async function startAR() {
+  initThree();
+  reticle = createReticle();
+
+  const sessionInit = {
+    requiredFeatures: ['hit-test'],
+    optionalFeatures: ['dom-overlay', 'light-estimation'],
+    domOverlay: { root: arOverlayEl }
+  };
+
+  try {
+    const session = await navigator.xr.requestSession('immersive-ar', sessionInit);
+    xrSession = session;
+
+    renderer.xr.setReferenceSpaceType('local');
+    await renderer.xr.setSession(session);
+
+    // Hide landing, show overlay
+    landingEl.style.display = 'none';
+    arOverlayEl.style.display = 'block';
+
+    // Start loop
+    renderer.setAnimationLoop(onXRFrame);
+
+    // Tap to place / water
+    renderer.domElement.addEventListener('click', handleTap);
+    renderer.domElement.addEventListener('touchend', e => {
+      e.preventDefault();
+      handleTap(e);
+    }, { passive: false });
+
+    // Plant button
+    plantBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (!reticleVisible || !lastHitPose) return;
+      const pos = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      const mat = new THREE.Matrix4().fromArray(lastHitPose.transform.matrix);
+      pos.setFromMatrixPosition(mat);
+      quat.setFromRotationMatrix(mat);
+      placePlant(pos, quat);
+    });
+
+    session.addEventListener('end', () => {
+      xrSession = null;
+      renderer.setAnimationLoop(null);
+      plants = [];
+      plantCount = 0;
+      plantCountEl.textContent = '0';
+      hitTestSourceRequested = false;
+      hitTestSource = null;
+      lastHitPose = null;
+      reticleVisible = false;
+      landingEl.style.display = 'flex';
+      arOverlayEl.style.display = 'none';
+      // Remove canvas
+      if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement);
+      renderer.dispose();
+      renderer = null;
+      scene = null;
+      camera = null;
+      reticle = null;
+      frameCount = 0;
+    });
+
+  } catch (err) {
+    console.error('WebXR Error:', err);
+    showToast('❌ Could not start AR session');
+    noArMsg.style.display = 'block';
+  }
+}
+
+// ── Exit AR ──────────────────────────────────────────
+exitBtn.addEventListener('click', () => {
+  if (xrSession) xrSession.end();
+});
+
+// ── Start button ─────────────────────────────────────
+startBtn.addEventListener('click', async () => {
+  const supported = await checkARSupport();
+  if (!supported) {
+    noArMsg.style.display = 'block';
+    noArMsg.textContent = '⚠️ WebXR AR not supported on this device. Please use Chrome on Android or Safari 16+ on iOS.';
+    return;
+  }
+  startBtn.disabled = true;
+  startBtn.textContent = '⏳ Initializing...';
+  await startAR();
+  startBtn.disabled = false;
+  startBtn.textContent = '✦ Start AR Experience';
+});
+
+// ── Scan hint text cycle ─────────────────────────────
+const hints = [
+  '📡 Move your phone slowly to detect surfaces',
+  '👆 Tap the screen to plant a seedling',
+  '💧 Tap a plant to water it',
+  '🌸 Watch your plants grow and bloom!'
+];
+let hintIdx = 0;
+setInterval(() => {
+  if (!xrSession) return;
+  hintIdx = (hintIdx + 1) % hints.length;
+  scanHintEl.textContent = hints[hintIdx];
+}, 5000);
+</script>
+</body>
+</html>
